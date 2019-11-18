@@ -1,0 +1,598 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  AWS CloudFormation template to create a new VPC or use an existing VPC for ECS
+  deployment in Create Cluster Wizard. Requires exactly 1 Instance Types for a
+  Spot Request.
+Parameters:
+  EcsClusterName:
+    Type: String
+    Description: >
+      Specifies the ECS Cluster Name with which the resources would be
+      associated
+    Default: default
+  EcsAmiId:
+    Type: String
+    Description: Specifies the AMI ID for your container instances.
+  EcsInstanceType:
+    Type: CommaDelimitedList
+    Description: >
+      Specifies the EC2 instance type for your container instances. Defaults to
+      m4.large
+    Default: m4.large
+    ConstraintDescription: must be a valid EC2 instance type.
+  KeyName:
+    Type: String
+    Description: >
+      Optional - Specifies the name of an existing Amazon EC2 key pair to enable
+      SSH access to the EC2 instances in your cluster.
+    Default: ''
+  VpcId:
+    Type: String
+    Description: >
+      Optional - Specifies the ID of an existing VPC in which to launch your
+      container instances. If you specify a VPC ID, you must specify a list of
+      existing subnets in that VPC. If you do not specify a VPC ID, a new VPC is
+      created with atleast 1 subnet.
+    Default: ''
+    ConstraintDescription: |
+      VPC Id must begin with 'vpc-' or leave blank to have a new VPC created
+  SubnetIds:
+    Type: CommaDelimitedList
+    Description: >
+      Optional - Specifies the Comma separated list of existing VPC Subnet Ids
+      where ECS instances will run
+    Default: ''
+  SecurityGroupId:
+    Type: String
+    Description: >
+      Optional - Specifies the Security Group Id of an existing Security Group.
+      Leave blank to have a new Security Group created
+    Default: ''
+  VpcCidr:
+    Type: String
+    Description: Optional - Specifies the CIDR Block of VPC
+    Default: ''
+  SubnetCidr1:
+    Type: String
+    Description: Specifies the CIDR Block of Subnet 1
+    Default: ''
+  SubnetCidr2:
+    Type: String
+    Description: Specifies the CIDR Block of Subnet 2
+    Default: ''
+  SubnetCidr3:
+    Type: String
+    Description: Specifies the CIDR Block of Subnet 3
+    Default: ''
+  AsgMaxSize:
+    Type: Number
+    Description: >
+      Specifies the number of instances to launch and register to the cluster.
+      Defaults to 1.
+    Default: '1'
+  IamRoleInstanceProfile:
+    Type: String
+    Description: >
+      Specifies the Name or the Amazon Resource Name (ARN) of the instance
+      profile associated with the IAM role for the instance
+  SecurityIngressFromPort:
+    Type: Number
+    Description: >
+      Optional - Specifies the Start of Security Group port to open on ECS
+      instances - defaults to port 0
+    Default: '0'
+  SecurityIngressToPort:
+    Type: Number
+    Description: >
+      Optional - Specifies the End of Security Group port to open on ECS
+      instances - defaults to port 65535
+    Default: '65535'
+  SecurityIngressCidrIp:
+    Type: String
+    Description: >
+      Optional - Specifies the CIDR/IP range for Security Ports - defaults to
+      0.0.0.0/0
+    Default: 0.0.0.0/0
+  EcsEndpoint:
+    Type: String
+    Description: |
+      Optional - Specifies the ECS Endpoint for the ECS Agent to connect to
+    Default: ''
+  VpcAvailabilityZones:
+    Type: CommaDelimitedList
+    Description: >
+      Specifies a comma-separated list of 3 VPC Availability Zones for the
+      creation of new subnets. These zones must have the available status.
+    Default: ''
+  EbsVolumeSize:
+    Type: Number
+    Description: >
+      Optional - Specifies the Size in GBs, of the newly created Amazon Elastic
+      Block Store (Amazon EBS) volume
+    Default: '0'
+  EbsVolumeType:
+    Type: String
+    Description: Optional - Specifies the Type of (Amazon EBS) volume
+    Default: ''
+    AllowedValues:
+      - ''
+      - standard
+      - io1
+      - gp2
+      - sc1
+      - st1
+    ConstraintDescription: Must be a valid EC2 volume type.
+  DeviceName:
+    Type: String
+    Description: Optional - Specifies the device mapping for the Volume
+  UseSpot:
+    Type: String
+    Default: 'false'
+  IamSpotFleetRoleArn:
+    Type: String
+    Default: ''
+  SpotPrice:
+    Type: String
+    Default: ''
+  SpotAllocationStrategy:
+    Type: String
+    Default: diversified
+    AllowedValues:
+      - lowestPrice
+      - diversified
+  UserData:
+    Type: String
+  IsWindows:
+    Type: String
+    Default: 'false'
+Conditions:
+  CreateEC2LCWithKeyPair: !Not 
+    - !Equals 
+      - Ref: KeyName
+      - ''
+  SetEndpointToECSAgent: !Not 
+    - !Equals 
+      - !Ref EcsEndpoint
+      - ''
+  CreateNewSecurityGroup: !Equals 
+    - Ref: SecurityGroupId
+    - ''
+  CreateNewVpc: !Equals 
+    - Ref: VpcId
+    - ''
+  CreateSubnet1: !And 
+    - !Not 
+      - !Equals 
+        - Ref: SubnetCidr1
+        - ''
+    - !Condition CreateNewVpc
+  CreateSubnet2: !And 
+    - !Not 
+      - !Equals 
+        - Ref: SubnetCidr2
+        - ''
+    - !Condition CreateSubnet1
+  CreateSubnet3: !And 
+    - !Not 
+      - !Equals 
+        - Ref: SubnetCidr3
+        - ''
+    - !Condition CreateSubnet2
+  CreateWithSpot: !Equals 
+    - !Ref UseSpot
+    - 'true'
+  CreateWithASG: !Not 
+    - !Condition CreateWithSpot
+  CreateWithSpotPrice: !Not 
+    - !Equals 
+      - Ref: SpotPrice
+      - ''
+Resources:
+  Vpc:
+    Condition: CreateSubnet1
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: cc648a5b-d39b-4b3d-be35-0d7c41e53a7c
+  PubSubnetAz1:
+    Condition: CreateSubnet1
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref SubnetCidr1
+      AvailabilityZone: !Select 
+        - 0
+        - !Ref VpcAvailabilityZones
+      MapPublicIpOnLaunch: true
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: a6258441-e2fc-4555-8e28-466653ea1310
+  PubSubnetAz2:
+    Condition: CreateSubnet2
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref SubnetCidr2
+      AvailabilityZone: !Select 
+        - 1
+        - !Ref VpcAvailabilityZones
+      MapPublicIpOnLaunch: true
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: d471ccd7-4c35-47b9-88da-0c3df3a66e46
+  PubSubnetAz3:
+    Condition: CreateSubnet3
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref SubnetCidr3
+      AvailabilityZone: !Select 
+        - 2
+        - !Ref VpcAvailabilityZones
+      MapPublicIpOnLaunch: true
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 79a3349b-d6c7-4901-b510-0551e1e1f6b6
+  InternetGateway:
+    Condition: CreateSubnet1
+    Type: 'AWS::EC2::InternetGateway'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: e4811e00-fac3-4ac7-b6cb-f47d202d5640
+  AttachGateway:
+    Condition: CreateSubnet1
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 3b262d11-317f-4ffb-b0da-b83c6bc59db6
+  RouteViaIgw:
+    Condition: CreateSubnet1
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref Vpc
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: c3de2723-177f-4f22-b635-34a6caaf176b
+  PublicRouteViaIgw:
+    Condition: CreateSubnet1
+    Type: 'AWS::EC2::Route'
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref RouteViaIgw
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 80dc9384-2099-405d-b288-783602bfd6ff
+  PubSubnet1RouteTableAssociation:
+    Condition: CreateSubnet1
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PubSubnetAz1
+      RouteTableId: !Ref RouteViaIgw
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 3ebd1766-0513-4476-a8db-fbcbf58d8f59
+  PubSubnet2RouteTableAssociation:
+    Condition: CreateSubnet2
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PubSubnetAz2
+      RouteTableId: !Ref RouteViaIgw
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 4afe36cb-3b0c-4c49-a727-27b895c87977
+  PubSubnet3RouteTableAssociation:
+    Condition: CreateSubnet3
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PubSubnetAz3
+      RouteTableId: !Ref RouteViaIgw
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 60cb89d9-e387-4c6c-8c6f-df5e5617882c
+  EcsSecurityGroup:
+    Condition: CreateNewSecurityGroup
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: ECS Allowed Ports
+      VpcId: !If 
+        - CreateSubnet1
+        - !Ref Vpc
+        - !Ref VpcId
+      SecurityGroupIngress:
+        IpProtocol: tcp
+        FromPort: !Ref SecurityIngressFromPort
+        ToPort: !Ref SecurityIngressToPort
+        CidrIp: !Ref SecurityIngressCidrIp
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 0b1b615a-d659-4338-9b80-025062aa48e9
+  EcsInstanceLc:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Condition: CreateWithASG
+    Properties:
+      ImageId: !Ref EcsAmiId
+      InstanceType: !Select 
+        - 0
+        - !Ref EcsInstanceType
+      AssociatePublicIpAddress: true
+      IamInstanceProfile: !Ref IamRoleInstanceProfile
+      KeyName: !If 
+        - CreateEC2LCWithKeyPair
+        - !Ref KeyName
+        - !Ref 'AWS::NoValue'
+      SecurityGroups:
+        - !If 
+          - CreateNewSecurityGroup
+          - !Ref EcsSecurityGroup
+          - !Ref SecurityGroupId
+      BlockDeviceMappings:
+        - DeviceName: !Ref DeviceName
+          Ebs:
+            VolumeSize: !Ref EbsVolumeSize
+            VolumeType: !Ref EbsVolumeType
+      UserData:
+        'Fn::Base64': !Ref UserData
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 34fa4c91-8a73-4305-a128-e4413dae0762
+  EcsInstanceAsg:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Condition: CreateWithASG
+    Properties:
+      VPCZoneIdentifier: !If 
+        - CreateSubnet1
+        - !If 
+          - CreateSubnet2
+          - !If 
+            - CreateSubnet3
+            - - !Sub '${PubSubnetAz1}, ${PubSubnetAz2}, ${PubSubnetAz3}'
+            - - !Sub '${PubSubnetAz1}, ${PubSubnetAz2}'
+          - - !Sub '${PubSubnetAz1}'
+        - !Ref SubnetIds
+      LaunchConfigurationName: !Ref EcsInstanceLc
+      MinSize: '0'
+      MaxSize: !Ref AsgMaxSize
+      DesiredCapacity: !Ref AsgMaxSize
+      Tags:
+        - Key: Name
+          Value: !Sub 'ECS Instance - ${AWS::StackName}'
+          PropagateAtLaunch: 'true'
+        - Key: Description
+          Value: >-
+            This instance is the part of the Auto Scaling group which was
+            created through ECS Console
+          PropagateAtLaunch: 'true'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 0fb5300d-261b-41e8-be9e-75f3e767be01
+  EcsSpotFleet:
+    Condition: CreateWithSpot
+    Type: 'AWS::EC2::SpotFleet'
+    Properties:
+      SpotFleetRequestConfigData:
+        AllocationStrategy: !Ref SpotAllocationStrategy
+        IamFleetRole: !Ref IamSpotFleetRoleArn
+        TargetCapacity: !Ref AsgMaxSize
+        SpotPrice: !If 
+          - CreateWithSpotPrice
+          - !Ref SpotPrice
+          - !Ref 'AWS::NoValue'
+        TerminateInstancesWithExpiration: true
+        LaunchSpecifications:
+          - IamInstanceProfile:
+              Arn: !Ref IamRoleInstanceProfile
+            ImageId: !Ref EcsAmiId
+            InstanceType: !Select 
+              - 0
+              - !Ref EcsInstanceType
+            KeyName: !If 
+              - CreateEC2LCWithKeyPair
+              - !Ref KeyName
+              - !Ref 'AWS::NoValue'
+            Monitoring:
+              Enabled: true
+            SecurityGroups:
+              - GroupId: !If 
+                  - CreateNewSecurityGroup
+                  - !Ref EcsSecurityGroup
+                  - !Ref SecurityGroupId
+            SubnetId: !If 
+              - CreateSubnet1
+              - !If 
+                - CreateSubnet2
+                - !If 
+                  - CreateSubnet3
+                  - !Join 
+                    - ','
+                    - - !Ref PubSubnetAz1
+                      - !Ref PubSubnetAz2
+                      - !Ref PubSubnetAz3
+                  - !Join 
+                    - ','
+                    - - !Ref PubSubnetAz1
+                      - !Ref PubSubnetAz2
+                - !Ref PubSubnetAz1
+              - !Join 
+                - ','
+                - !Ref SubnetIds
+            BlockDeviceMappings:
+              - DeviceName: !Ref DeviceName
+                Ebs:
+                  VolumeSize: !Ref EbsVolumeSize
+                  VolumeType: !Ref EbsVolumeType
+            UserData:
+              'Fn::Base64': !Ref UserData
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: c1ac5c2f-ad4a-4144-9641-e88cb65f1055
+Outputs:
+  EcsInstanceAsgName:
+    Condition: CreateWithASG
+    Description: Auto Scaling Group Name for ECS Instances
+    Value: !Ref EcsInstanceAsg
+  EcsSpotFleetRequestId:
+    Condition: CreateWithSpot
+    Description: Spot Fleet Request for ECS Instances
+    Value: !Ref EcsSpotFleet
+  UsedByECSCreateCluster:
+    Description: Flag used by ECS Create Cluster Wizard
+    Value: 'true'
+  TemplateVersion:
+    Description: The version of the template used by Create Cluster Wizard
+    Value: 2.0.0
+Metadata:
+  'AWS::CloudFormation::Designer':
+    e4811e00-fac3-4ac7-b6cb-f47d202d5640:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 720
+        'y': 90
+      z: 1
+      embeds: []
+    cc648a5b-d39b-4b3d-be35-0d7c41e53a7c:
+      size:
+        width: 600
+        height: 600
+      position:
+        x: 50
+        'y': 130
+      z: 1
+      embeds:
+        - c3de2723-177f-4f22-b635-34a6caaf176b
+        - 79a3349b-d6c7-4901-b510-0551e1e1f6b6
+        - d471ccd7-4c35-47b9-88da-0c3df3a66e46
+        - a6258441-e2fc-4555-8e28-466653ea1310
+    0b1b615a-d659-4338-9b80-025062aa48e9:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 720
+        'y': 210
+      z: 1
+      embeds: []
+    34fa4c91-8a73-4305-a128-e4413dae0762:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 720
+        'y': 330
+      z: 1
+      embeds: []
+    0fb5300d-261b-41e8-be9e-75f3e767be01:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 720
+        'y': 450
+      z: 1
+      embeds: []
+      isassociatedwith:
+        - 34fa4c91-8a73-4305-a128-e4413dae0762
+    c3de2723-177f-4f22-b635-34a6caaf176b:
+      size:
+        width: 240
+        height: 240
+      position:
+        x: 80
+        'y': 190
+      z: 2
+      parent: cc648a5b-d39b-4b3d-be35-0d7c41e53a7c
+      embeds:
+        - 80dc9384-2099-405d-b288-783602bfd6ff
+      iscontainedinside:
+        - cc648a5b-d39b-4b3d-be35-0d7c41e53a7c
+    3b262d11-317f-4ffb-b0da-b83c6bc59db6:
+      source:
+        id: cc648a5b-d39b-4b3d-be35-0d7c41e53a7c
+      target:
+        id: e4811e00-fac3-4ac7-b6cb-f47d202d5640
+    80dc9384-2099-405d-b288-783602bfd6ff:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 110
+        'y': 250
+      z: 3
+      parent: c3de2723-177f-4f22-b635-34a6caaf176b
+      embeds: []
+      isassociatedwith:
+        - e4811e00-fac3-4ac7-b6cb-f47d202d5640
+      iscontainedinside:
+        - c3de2723-177f-4f22-b635-34a6caaf176b
+      dependson:
+        - 3b262d11-317f-4ffb-b0da-b83c6bc59db6
+    79a3349b-d6c7-4901-b510-0551e1e1f6b6:
+      size:
+        width: 150
+        height: 150
+      position:
+        x: 80
+        'y': 490
+      z: 2
+      parent: cc648a5b-d39b-4b3d-be35-0d7c41e53a7c
+      embeds: []
+      iscontainedinside:
+        - cc648a5b-d39b-4b3d-be35-0d7c41e53a7c
+    60cb89d9-e387-4c6c-8c6f-df5e5617882c:
+      source:
+        id: c3de2723-177f-4f22-b635-34a6caaf176b
+      target:
+        id: 79a3349b-d6c7-4901-b510-0551e1e1f6b6
+    d471ccd7-4c35-47b9-88da-0c3df3a66e46:
+      size:
+        width: 150
+        height: 150
+      position:
+        x: 380
+        'y': 400
+      z: 2
+      parent: cc648a5b-d39b-4b3d-be35-0d7c41e53a7c
+      embeds: []
+      iscontainedinside:
+        - cc648a5b-d39b-4b3d-be35-0d7c41e53a7c
+    4afe36cb-3b0c-4c49-a727-27b895c87977:
+      source:
+        id: c3de2723-177f-4f22-b635-34a6caaf176b
+      target:
+        id: d471ccd7-4c35-47b9-88da-0c3df3a66e46
+    a6258441-e2fc-4555-8e28-466653ea1310:
+      size:
+        width: 150
+        height: 150
+      position:
+        x: 380
+        'y': 190
+      z: 2
+      parent: cc648a5b-d39b-4b3d-be35-0d7c41e53a7c
+      embeds: []
+      iscontainedinside:
+        - cc648a5b-d39b-4b3d-be35-0d7c41e53a7c
+    c1ac5c2f-ad4a-4144-9641-e88cb65f1055:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 720
+        'y': 570
+      z: 1
+      embeds: []
+    3ebd1766-0513-4476-a8db-fbcbf58d8f59:
+      source:
+        id: c3de2723-177f-4f22-b635-34a6caaf176b
+      target:
+        id: a6258441-e2fc-4555-8e28-466653ea1310

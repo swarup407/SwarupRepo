@@ -1,0 +1,5 @@
+For doing these , we can take help from kubernetes official github pages :
+
+1. https://github.com/kubernetes/kops
+
+2. https://github.com/kubernetes/kubernetes/tree/master/cluster/addons/fluentd-elasticsearch
